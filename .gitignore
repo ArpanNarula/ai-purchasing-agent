@@ -6,3 +6,7 @@ coverage/
 npm-debug.log*
 .DS_Store
 *.tsbuildinfo
+
+# Local generated artifacts
+output/
+tmp/
