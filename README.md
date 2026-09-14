@@ -1,87 +1,93 @@
-# Atlas — AI Purchasing Agent
+# Atlas - AI Purchasing Agent
 
-Atlas is a full-stack purchasing decision system that investigates evidence, makes a constrained recommendation, takes an approved action, validates the real outcome, and recovers when the supplier response differs from the plan.
+I built Atlas for the AI Purchasing Agent assignment. It reviews a purchase recommendation, gathers the information a buyer would normally check, decides whether the recommendation should be accepted or changed, and can create and validate a mock purchase order.
 
-The core demo implements **Purchase Recommendation Review** end-to-end and continues into **Supplier Cannot Fulfil the Purchase** as the post-action failure branch. It is deliberately a narrow, auditable vertical slice rather than a broad purchasing chatbot.
+I chose to go deep on **Scenario 1 (Purchase Recommendation Review)** instead of implementing four shallow flows. After the order is created, the main demo deliberately continues into **Scenario 2**: the supplier only confirms part of the quantity, so the agent has to detect the shortfall and decide what to do next.
 
-## What the demo proves
+## The flow I implemented
 
-- A system recommendation is treated as an input, not as truth.
-- The agent retrieves inventory, demand, open POs, supplier terms, budget, and storage through explicit tools.
-- Quantity math and execution guardrails are deterministic and testable.
-- High-value actions require human approval.
-- A successful write is not considered a successful outcome until it is read back and validated.
-- A partial supplier confirmation triggers an alternate-supplier recovery plan or safe escalation.
-- The complete investigation, decision, action, and validation history is visible in the UI.
+1. The purchasing system recommends buying 800 units.
+2. The agent checks inventory, forecast demand, open purchase orders, supplier terms, budget, and storage.
+3. It calculates the actual requirement and returns `ACCEPT`, `MODIFY`, `REJECT`, or `INVESTIGATE` with its reasoning.
+4. A buyer approves the proposed action when the spend is above the approval threshold.
+5. The system checks the data again immediately before creating the PO.
+6. It reads the supplier response back and validates what was actually confirmed.
+7. If the result is different from the plan, the agent attempts a guarded recovery or escalates the case.
+
+Every step is shown in the activity timeline, including the tool used and whether a guardrail passed.
+
+## A design choice I made
+
+I did not want the LLM to be responsible for purchasing arithmetic or financial controls.
+
+The agent can choose which information tools to call and explain the decision, but the final quantity is calculated by a deterministic policy in `lib/policy.ts`. Before any write, `lib/executor.ts` runs the policy again using the latest data. If a model ever proposes something different from the policy result, the policy wins and the correction is added to the audit trail.
+
+This keeps the flexible part of the workflow agentic while making the important controls easy to test and explain.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Buyer[Buyer console] -->|Run review| Agent[Buyer agent orchestrator]
-    Agent --> Tools[Read-only purchasing tools]
+    Buyer[Buyer console] -->|Run review| Agent[Buyer agent]
+    Agent --> Tools[Purchasing tools]
     Tools --> Inventory[(Inventory)]
     Tools --> Demand[(Forecast)]
-    Tools --> POs[(Open POs)]
-    Tools --> Supplier[(Supplier terms)]
-    Tools --> Limits[(Budget + storage)]
-    Agent --> Policy[Deterministic policy engine]
-    Policy --> Guardrail{Safe to act?}
-    Guardrail -->|No| Investigate[Investigate / reject]
-    Guardrail -->|Approval required| Buyer
+    Tools --> OpenPOs[(Open POs)]
+    Tools --> Suppliers[(Supplier terms)]
+    Tools --> Constraints[(Budget + storage)]
+
+    Agent --> Policy[Deterministic policy]
+    Policy --> Gate{Safe to act?}
+    Gate -->|No| Stop[Investigate / reject]
+    Gate -->|Approval needed| Buyer
     Buyer -->|Approve| Executor[PO executor]
-    Executor --> MockAPI[Mock supplier API]
-    MockAPI --> Validator[Outcome validator]
-    Validator -->|Matches| Done[Validated outcome]
-    Validator -->|Partial / rejected| Recovery[Alternate supplier recovery]
+    Executor --> SupplierAPI[Mock supplier API]
+    SupplierAPI --> Validator[Outcome validator]
+    Validator -->|Matches plan| Complete[Complete]
+    Validator -->|Partial / rejected| Recovery[Recovery policy]
     Recovery --> Policy
 ```
 
-### Trust boundary
+## How the quantity is calculated
 
-The LLM is allowed to decide which evidence tools to call and how to explain a result. It is **not** trusted with purchasing arithmetic or write authorization. `lib/policy.ts` computes the authoritative quantity and `lib/executor.ts` re-reads the scenario before every write. If a live-model proposal disagrees with policy, the policy result wins and the correction is recorded in the audit trace.
-
-This gives us the flexibility of an agent without making an unverified model output a financial control.
-
-## Decision policy
-
-The simplified policy is:
+The policy uses a small and explainable replenishment calculation:
 
 ```text
 target stock = daily forecast × planning horizon + safety stock
 net requirement = target stock − usable inventory − confirmed incoming POs
-policy quantity = net requirement rounded to supplier case pack
-executable quantity = min(policy quantity, budget capacity, storage capacity, supplier capacity)
+policy quantity = net requirement rounded to the supplier case pack
+executable quantity = min(policy quantity, budget, storage, supplier capacity)
 ```
 
-The agent returns one of four outcomes:
+It also checks forecast confidence, MOQ, case-pack size, supplier capacity, budget, storage, existing orders, and the buyer approval threshold.
 
-- `ACCEPT` — original recommendation equals the safe policy quantity.
-- `MODIFY` — buying is justified, but the quantity must change.
-- `REJECT` — no additional safe purchase is required or possible.
-- `INVESTIGATE` — evidence is missing, stale, or below the autonomy threshold.
+The possible decisions are:
 
-MOQ, case pack, budget, storage, capacity, forecast quality, open orders, and the approval threshold are checked explicitly.
+- `ACCEPT`: the original recommendation matches the safe quantity.
+- `MODIFY`: a purchase is needed, but the quantity should change.
+- `REJECT`: an additional purchase is unnecessary or cannot be made safely.
+- `INVESTIGATE`: the evidence is missing, stale, or not reliable enough to act on.
 
-## Feedback loop
+## The feedback loop
 
-The core fixture starts with an 800-unit system recommendation. The policy deducts usable inventory and 300 already incoming units, then recommends **624 units**.
+This is the part of the assignment I focused on most.
 
-After buyer approval:
+In the core scenario, the system recommends 800 units. After deducting usable inventory and a confirmed incoming PO, the agent changes the recommendation to **624 units**.
 
-1. The executor revalidates fresh purchasing data.
-2. It requests 624 units from BluePeak Beverages.
-3. The mock supplier confirms only 250 units.
-4. The validator detects a 374-unit shortfall.
-5. The recovery policy selects the highest-reliability eligible alternate.
-6. It rounds the shortfall to a 384-unit case pack, rechecks remaining budget/storage and the buyer-approved 5% spend tolerance, and creates the recovery PO.
-7. The validator confirms 634 combined units, covering the target with 10 units of valid pack rounding.
+When the buyer approves it:
 
-This is the important distinction between validating an API call and validating the purchasing outcome.
+1. BluePeak Beverages receives a request for 624 units.
+2. The mock supplier confirms only 250 units and declines the remainder.
+3. The validator catches the 374-unit shortfall instead of treating the API call as success.
+4. The recovery policy checks alternate suppliers.
+5. AquaSource South can cover the gap, so the quantity is rounded to its 24-unit case pack and a second PO is created for 384 units.
+6. The final validation confirms 634 units across both suppliers, which covers the 624-unit requirement with 10 units of pack rounding.
 
-## Run locally
+The recovery order is allowed only if it still fits the remaining budget and storage, respects supplier terms, and stays within a 5% spend tolerance covered by the buyer's original approval. Otherwise, the agent escalates instead of placing another order.
 
-Requirements: Node.js 20 or newer.
+## Running it locally
+
+You will need Node.js 20 or newer.
 
 ```bash
 npm install
@@ -89,13 +95,19 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Then open [http://localhost:3000](http://localhost:3000).
 
-The default `AGENT_MODE=demo` is deterministic and requires no external services. Select **Core demo**, click **Run agent review**, inspect the evidence and recommendation, then click **Approve & execute** to see the validation and recovery loop.
+The app runs in deterministic demo mode by default, so an API key is not required. For the complete flow:
 
-## Optional live OpenAI mode
+1. Select **Core demo**.
+2. Click **Run agent review**.
+3. Review the evidence, calculation, and constraint checks.
+4. Click **Approve & execute**.
+5. Follow the partial-confirmation and recovery steps in the activity timeline.
 
-Set the following values in `.env.local`:
+## Running with an OpenAI model
+
+Live model mode is optional. Add these values to `.env.local`:
 
 ```bash
 OPENAI_API_KEY=your_key_here
@@ -103,18 +115,22 @@ OPENAI_MODEL=gpt-5.4-mini
 AGENT_MODE=openai
 ```
 
-The live agent uses the OpenAI Responses API with strict function tools. Provider failure falls back to the deterministic policy, and the UI records that fallback. Never commit `.env.local` or credentials.
+In live mode, the agent uses strict function tools through the Responses API. If the provider is unavailable, the application falls back to the same deterministic policy and records the fallback in the timeline.
 
-## API surface
+No secrets should be committed. `.env.local` is ignored and `.env.example` documents the expected configuration.
 
-| Route | Purpose |
+## Test scenarios
+
+| Scenario | Expected behaviour |
 | --- | --- |
-| `GET /api/scenarios` | Returns the four evaluation fixtures |
-| `POST /api/agent/run` | Investigates a scenario and creates a validated recommendation |
-| `POST /api/purchase-orders/execute` | Revalidates, creates mock POs, reads outcomes back, and recovers/escalates |
-| `POST /api/reset` | Clears process-local demo state |
+| Core demo | Modify 800 to 624, detect a 250-unit confirmation, and recover the shortfall |
+| Accept | Accept the original 800-unit recommendation |
+| Constrained | Reduce the quantity because budget and storage cannot support the full requirement |
+| Investigate | Stop without creating a PO because the forecast is stale and low-confidence |
 
-## Tests and quality checks
+The detailed evaluation scorecard is in [docs/evaluation.md](docs/evaluation.md). I check the decision, required tool calls, constraint compliance, action, persisted supplier response, and recovery result separately so a failure is easy to diagnose.
+
+## Tests
 
 ```bash
 npm test
@@ -122,21 +138,32 @@ npm run typecheck
 npm run build
 ```
 
-The full evaluation scorecard is documented in [docs/evaluation.md](docs/evaluation.md). It tests decision correctness, information retrieval, constraint compliance, action behaviour, validation, and recovery.
+The automated tests cover all four policy outcomes plus the full confirmation and partial-confirmation execution paths.
 
-## Repository map
+## API routes
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/scenarios` | Returns the mock purchasing scenarios |
+| `POST /api/agent/run` | Investigates a scenario and produces a policy-validated decision |
+| `POST /api/purchase-orders/execute` | Revalidates the plan, creates mock POs, checks the result, and recovers or escalates |
+| `POST /api/reset` | Clears the in-memory demo state |
+
+## Project structure
 
 ```text
-app/                       Next.js UI and API route handlers
-components/buyer-console  Interactive buyer workflow
-lib/agent.ts               Tool-calling orchestrator + safe fallback
-lib/policy.ts              Authoritative purchasing calculations
-lib/executor.ts            Write, read-back validation, and recovery loop
-lib/scenarios.ts           Mock operational dataset
-tests/                     Policy and end-to-end execution tests
-docs/evaluation.md         Evaluation design and limitations
+app/                       Next.js pages and API routes
+components/buyer-console  Buyer dashboard and workflow UI
+lib/agent.ts               Tool-calling agent and deterministic fallback
+lib/policy.ts              Purchasing calculations and constraints
+lib/executor.ts            PO execution, validation, and recovery
+lib/scenarios.ts           Mock data for the four evaluation cases
+tests/                     Policy and execution tests
+docs/evaluation.md         Evaluation approach and known limitations
 ```
 
-## Production evolution
+## What I would add next
 
-For a production deployment, the in-memory store would become a transactional database; mock tools would be isolated adapters for inventory, forecasting, procurement, and supplier services; approvals would be identity-backed; and supplier confirmations would arrive through idempotent events. Policy versions and input snapshots would be persisted with every decision for reproducibility.
+Given more time, I would replace the in-memory store with a transactional database, move each mock tool behind its own adapter, persist policy versions and input snapshots, and process supplier confirmations through idempotent webhook events. I would also add identity-backed approvals and a replayable evaluation dataset for regression testing.
+
+For this assignment, I kept those pieces mocked so I could spend the time on the decision quality, safety boundaries, and feedback loop.
