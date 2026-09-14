@@ -7,18 +7,18 @@ interface DemoStore {
 }
 
 const globalStore = globalThis as typeof globalThis & {
-  __atlasBuyerStore?: DemoStore;
+  __buyerAgentStore?: DemoStore;
 };
 
 export const store: DemoStore =
-  globalStore.__atlasBuyerStore ?? {
+  globalStore.__buyerAgentStore ?? {
     runs: new Map(),
     executions: new Map(),
     purchaseOrders: [],
   };
 
 if (process.env.NODE_ENV !== "production") {
-  globalStore.__atlasBuyerStore = store;
+  globalStore.__buyerAgentStore = store;
 }
 
 export function resetStore() {

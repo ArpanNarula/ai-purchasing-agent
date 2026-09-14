@@ -1,6 +1,6 @@
-# Atlas - AI Purchasing Agent
+# AI Purchasing Agent
 
-I built Atlas for the AI Purchasing Agent assignment. It reviews a purchase recommendation, gathers the information a buyer would normally check, decides whether the recommendation should be accepted or changed, and can create and validate a mock purchase order.
+I built this project for the AI Purchasing Agent assignment. It reviews a purchase recommendation, gathers the information a buyer would normally check, decides whether the recommendation should be accepted or changed, and can create and validate a mock purchase order.
 
 I chose to go deep on **Scenario 1 (Purchase Recommendation Review)** instead of implementing four shallow flows. After the order is created, the main demo deliberately continues into **Scenario 2**: the supplier only confirms part of the quantity, so the agent has to detect the shortfall and decide what to do next.
 

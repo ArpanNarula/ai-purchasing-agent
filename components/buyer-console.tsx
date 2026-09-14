@@ -170,7 +170,7 @@ export function BuyerConsole({ initialScenarios }: { initialScenarios: Purchasin
         <div className="brand">
           <span className="brand-mark"><Sparkles size={19} /></span>
           <div>
-            <strong>Atlas</strong>
+            <strong>Buyer Agent</strong>
             <span>Purchasing intelligence</span>
           </div>
         </div>
@@ -259,7 +259,7 @@ export function BuyerConsole({ initialScenarios }: { initialScenarios: Purchasin
               <div className="ready-copy">
                 <span className="eyebrow">Buyer agent ready</span>
                 <h2>Review this recommendation against every constraint</h2>
-                <p>Atlas will investigate six sources, calculate the safe requirement, explain the decision, and prepare an auditable action.</p>
+                <p>The agent will investigate six sources, calculate the safe requirement, explain the decision, and prepare an auditable action.</p>
                 <div className="tool-chips">
                   <span><Database size={13} /> Inventory</span><span><TrendingUp size={13} /> Forecast</span><span><PackageCheck size={13} /> Open POs</span><span><CloudCog size={13} /> Supplier</span><span><CircleDollarSign size={13} /> Budget</span><span><Warehouse size={13} /> Storage</span>
                 </div>

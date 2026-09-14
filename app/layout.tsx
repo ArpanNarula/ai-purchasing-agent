@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Atlas · AI Buyer Agent",
+  title: "AI Purchasing Agent",
   description: "An auditable purchasing agent for high-confidence buying decisions.",
 };
 
